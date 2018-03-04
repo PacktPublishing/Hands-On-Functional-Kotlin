@@ -1,7 +1,7 @@
+import arrow.core.ev
 import arrow.core.value
 import arrow.data.Reader
 import arrow.data.andThen
-import arrow.syntax.foldable.fold
 
 fun main(args: Array<String>) {
     dbReader()
@@ -12,9 +12,9 @@ fun main(args: Array<String>) {
 fun dbReader() {
     val dataBase = DataBase()
     Reader { db: DataBase -> db.readUserName() }
-            .run(dataBase)
+            .run.invoke(dataBase)
             .value()
-            .let(::print)
+            .let(::println)
 }
 
 fun dbReaderLocal() {
@@ -28,20 +28,20 @@ fun dbReaderLocal() {
                     else -> dataBase2
                 }
             }
-    dbCall.run(1)
+    dbCall.run.invoke(1)
             .value()
-            .let(::print)
+            .let(::println)
 }
 
 fun dbReaderAndThen() {
     val dataBase = DataBase()
     fun newReader(s: String) = when (s) {
-        "John" -> Reader { it: String -> +it.length }
-        else -> Reader { it: String -> +it.length * 2 }
+        "John" -> s.length
+        else -> s.length * 2
     }
     Reader { db: DataBase -> db.readUserName() }
             .andThen(::newReader)
             .run(dataBase)
-            .fold()
-            .let(::print)
+            .value()
+            .let(::println)
 }
