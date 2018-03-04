@@ -67,14 +67,21 @@ class ActionHandlerImpl(
 
     val binder by lazy(binderProducer)
 
-    override fun dispatchAction(a: Action) = coroutinesLaunch(UI) {
-        state = when (a) {
-            Refresh -> refresh(state, binder, dataSource)
-            Clear -> clear(state, binder)
-        }
+    override fun dispatchAction(a: Action): Job = coroutinesLaunch(UI) {
+        state = reduce(
+                a,
+                { refresh(state, binder, dataSource) },
+                { clear(state, binder) }
+        )
     }
 
 }
+
+inline fun reduce(a: Action, refresh: () -> RootState, clear: () -> RootState): RootState =
+        when (a) {
+            Refresh -> refresh()
+            Clear -> clear()
+        }
 
 val errorHandler = { state: RootState, binder: Binder<RootState>, _: Throwable ->
     updateState(state, Unit, binder) {
