@@ -1,3 +1,8 @@
+import arrow.core.Either
+import arrow.effects.IO
+import arrow.syntax.either.left
+import arrow.syntax.either.right
+import arrow.syntax.function.curried
 import javafx.application.Application
 import javafx.collections.FXCollections
 import javafx.collections.ObservableList
@@ -9,22 +14,24 @@ import javafx.scene.layout.HBox
 import javafx.scene.layout.VBox
 import javafx.scene.text.Text
 import javafx.stage.Stage
-import kotlinx.coroutines.experimental.launch as coroutinesLaunch
+import kotlinx.coroutines.experimental.Job
 import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.launch as coroutinesLaunch
 import java.io.IOException
 import java.util.Random
+import kotlin.coroutines.experimental.suspendCoroutine
 import kotlinx.coroutines.experimental.javafx.JavaFx as UI
 
 class FunctionalKotlinSample : Application() {
 
-    lateinit var binder: Binder
+    lateinit var binder: Binder<RootState>
 
     override fun start(primaryStage: Stage) {
-        val dataSource = DataSource()
+        val dataSource = DataSourceImpl()
         val state = RootState()
-        val dispatcher = Dispatcher(dataSource, { binder }, state)
+        val dispatcher = ActionHandlerImpl(dataSource, { binder }, state)
         val rootView = RootView(primaryStage)
-        binder = Binder(rootView, dispatcher)
+        binder = BinderImpl(rootView, dispatcher)
         dispatcher.dispatchAction(Refresh)
     }
 
@@ -37,51 +44,76 @@ class FunctionalKotlinSample : Application() {
     }
 }
 
-class DataSource {
-    suspend fun downloadNames(): List<String> {
+class DataSourceImpl : DataSource {
+    override suspend fun downloadNames(): IO<List<String>> {
         delay(2000)
-        if (Random().nextInt() % 5 == 0) throw IOException()
-        return listOf("Adam", "Alex", "Alfred", "Albert",
-                "Brenda", "Connie", "Derek", "Donny",
-                "Lynne", "Myrtle", "Rose", "Rudolph",
-                "Tony", "Trudy", "Williams", "Zach"
-        ).shuffled()
+        return IO {
+            if (Random().nextInt() % 2 == 0) throw IOException()
+            listOf("Adam", "Alex", "Alfred", "Albert",
+                    "Brenda", "Connie", "Derek", "Donny",
+                    "Lynne", "Myrtle", "Rose", "Rudolph",
+                    "Tony", "Trudy", "Williams", "Zach"
+            ).shuffled()
+        }
     }
 }
 
-sealed class Action
-object Refresh : Action()
-object Clear : Action()
+//Side effects container
+class ActionHandlerImpl(
+        val dataSource: DataSource,
+        binderProducer: () -> Binder<RootState>,
+        var state: RootState
+) : ActionHandler<Job> {
 
-class Dispatcher(val dataSource: DataSource, val binder: () -> Binder, var state: RootState) {
-    fun dispatchAction(a: Action) = when (a) {
-        Refresh -> refresh()
-        Clear -> clear()
+    val binder by lazy(binderProducer)
+
+    override fun dispatchAction(a: Action) = coroutinesLaunch(UI) {
+        state = when (a) {
+            Refresh -> refresh(state, binder, dataSource)
+            Clear -> clear(state, binder)
+        }
     }
-
-    private fun clear() = coroutinesLaunch(UI) {
-        state = updateState(state, emptyList<String>(), binder) { copy(names = it) }
-    }
-
-    private fun refresh() = coroutinesLaunch(UI) {
-        state = updateState(state, Unit, binder) { copy(showLoading = true) }
-        val names = dataSource.downloadNames()
-        state = updateState(state, names, binder) { copy(names = it, showLoading = false) }
-    }
-
-    private fun <T : Any> updateState(state: RootState, arg: T, binder: () -> Binder, f: RootState.(T) -> RootState): RootState =
-            f(state, arg).let(binder()::bind)
 
 }
 
-//Immutable app state
-data class RootState(
-        val title: String = "Hands On Functional Kotlin",
-        val refreshText: String = "Refresh",
-        val clearText: String = "Clear",
-        val loadingText: String = "Loading...",
-        val showLoading: Boolean = true,
-        val names: List<String> = emptyList())
+val errorHandler = { state: RootState, binder: Binder<RootState>, _: Throwable ->
+    updateState(state, Unit, binder) {
+        copy(showLoading = false, showError = true)
+    }
+}.curried()
+
+val refreshHandler = { state: RootState, binder: Binder<RootState>, names: List<String> ->
+    updateState(state, names, binder) {
+        copy(names = it, showLoading = false, showError = false)
+    }
+}.curried()
+
+private suspend fun clear(state: RootState, binder: Binder<RootState>) =
+        updateState(state, emptyList<String>(), binder) { copy(names = it) }
+
+private suspend fun refresh(state: RootState, binder: Binder<RootState>, dataSource: DataSource): RootState {
+    updateState(state, Unit, binder) { copy(showLoading = true, showError = false) }
+    return dataSource.downloadNames().await().fold(
+            errorHandler(state)(binder),
+            refreshHandler(state)(binder)
+    )
+}
+
+inline fun <T : Any> updateState(
+        state: RootState,
+        arg: T,
+        binder: Binder<RootState>,
+        f: RootState.(T) -> RootState
+): RootState = f(state, arg).let(binder::bind)
+
+suspend fun <T : Any> IO<T>.await(): Either<Throwable, T> = suspendCoroutine { cont ->
+    unsafeRunAsync {
+        it.fold(
+                { cont.resume(it.left()) },
+                { cont.resume(it.right()) }
+        )
+    }
+}
 
 class RootView(val primaryStage: Stage) {
 
@@ -90,6 +122,7 @@ class RootView(val primaryStage: Stage) {
     val refresh = Button()
     val clear = Button()
     val loading = Text()
+    val error = Text()
     val list = ListView<String>()
 
     init {
@@ -98,23 +131,26 @@ class RootView(val primaryStage: Stage) {
 
         val root = VBox()
 
-        VBox.setMargin(loading, Insets(16.0))
         val buttons = HBox()
         buttons.children.add(refresh)
         buttons.children.add(clear)
         root.children.add(buttons)
-        root.children.add(loading)
+        val messages = HBox(loading, error)
+        HBox.setMargin(loading, Insets(16.0))
+        HBox.setMargin(error, Insets(16.0))
+        root.children.add(messages)
         root.children.add(list)
         primaryStage.scene = Scene(root, width, height)
         primaryStage.show()
     }
 }
 
-class Binder(private val view: RootView, val dispatcher: Dispatcher) {
+//Side effects container
+class BinderImpl(private val view: RootView, val actionHandler: ActionHandler<Job>) : Binder<RootState> {
 
     val data: ObservableList<String> = FXCollections.observableArrayList()
 
-    fun bind(state: RootState): RootState = state.apply {
+    override fun bind(state: RootState): RootState = state.apply {
         data.apply {
             clear()
             addAll(names)
@@ -125,9 +161,11 @@ class Binder(private val view: RootView, val dispatcher: Dispatcher) {
             refresh.text = refreshText
             clear.text = clearText
             list.items = data
+            error.text = errorText
             loading.isVisible = showLoading
-            refresh.setOnMouseClicked { dispatcher.dispatchAction(Refresh) }
-            clear.setOnMouseClicked { dispatcher.dispatchAction(Clear) }
+            error.isVisible = showError
+            refresh.setOnMouseClicked { actionHandler.dispatchAction(Refresh) }
+            clear.setOnMouseClicked { actionHandler.dispatchAction(Clear) }
         }
     }
 }
