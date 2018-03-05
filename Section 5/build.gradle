@@ -21,6 +21,9 @@ dependencies {
     compile 'io.arrow-kt:arrow-effects:0.6.1'
 }
 
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
+kotlin.experimental.coroutines 'enable'
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile) {
     kotlinOptions.jvmTarget = "1.8"
 }
+
