@@ -1,9 +1,5 @@
-import arrow.core.Either
 import arrow.effects.IO
-import arrow.syntax.either.left
-import arrow.syntax.either.right
 import arrow.syntax.function.curried
-import javafx.application.Application
 import javafx.collections.FXCollections
 import javafx.collections.ObservableList
 import javafx.geometry.Insets
@@ -16,33 +12,10 @@ import javafx.scene.text.Text
 import javafx.stage.Stage
 import kotlinx.coroutines.experimental.Job
 import kotlinx.coroutines.experimental.delay
-import kotlinx.coroutines.experimental.launch as coroutinesLaunch
+import kotlinx.coroutines.experimental.launch
 import java.io.IOException
 import java.util.Random
-import kotlin.coroutines.experimental.suspendCoroutine
 import kotlinx.coroutines.experimental.javafx.JavaFx as UI
-
-class FunctionalKotlinSample : Application() {
-
-    lateinit var binder: Binder<RootState>
-
-    override fun start(primaryStage: Stage) {
-        val dataSource = DataSourceImpl()
-        val state = RootState()
-        val dispatcher = ActionHandlerImpl(dataSource, { binder }, state)
-        val rootView = RootView(primaryStage)
-        binder = BinderImpl(rootView, dispatcher)
-        dispatcher.dispatchAction(Refresh)
-    }
-
-    companion object {
-        // Entry point
-        @JvmStatic fun main(args: Array<String>) {
-            // Launch example App
-            launch(FunctionalKotlinSample::class.java)
-        }
-    }
-}
 
 class DataSourceImpl : DataSource {
     override suspend fun downloadNames(): IO<List<String>> {
@@ -67,7 +40,7 @@ class ActionHandlerImpl(
 
     val binder by lazy(binderProducer)
 
-    override fun dispatchAction(a: Action): Job = coroutinesLaunch(UI) {
+    override fun dispatchAction(a: Action): Job = launch(UI) {
         state = reduce(
                 a,
                 { refresh(state, binder, dataSource) },
@@ -112,15 +85,6 @@ inline fun <T : Any> updateState(
         binder: Binder<RootState>,
         f: RootState.(T) -> RootState
 ): RootState = f(state, arg).let(binder::bind)
-
-suspend fun <T : Any> IO<T>.await(): Either<Throwable, T> = suspendCoroutine { cont ->
-    unsafeRunAsync {
-        it.fold(
-                { cont.resume(it.left()) },
-                { cont.resume(it.right()) }
-        )
-    }
-}
 
 class RootView(val primaryStage: Stage) {
 
