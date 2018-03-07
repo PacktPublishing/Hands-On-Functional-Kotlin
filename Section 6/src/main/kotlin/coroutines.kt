@@ -23,5 +23,14 @@ fun main(args: Array<String>) {
                 )
     }
 
-    launch(UI) {  }
+    launch(UI) {
+        IO { "Hello Coroutine" }
+                // Run asynchronously
+                .await()
+                // Wait for result on Coroutine dispatcher
+                .fold(
+                        { println("Error $it")},
+                        { println("Success $it")}
+                )
+    }
 }
