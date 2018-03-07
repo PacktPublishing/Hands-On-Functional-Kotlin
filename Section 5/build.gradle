@@ -1,29 +1,17 @@
-buildscript {
-    ext.kotlin_version = '1.2.21'
-
-    repositories {
-        mavenCentral()
-    }
-    dependencies {
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-    }
+plugins {
+    id "org.jetbrains.kotlin.jvm" version "1.2.30"
 }
 
 group 'Packt'
 version '1.0-SNAPSHOT'
-
-apply plugin: 'java'
-apply plugin: 'kotlin'
-
-sourceCompatibility = 1.8
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
-    testCompile group: 'junit', name: 'junit', version: '4.12'
+    compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+    testCompile 'junit:junit:4.12'
     compile 'org.jetbrains.kotlinx:kotlinx-coroutines-core:0.22.3'
     compile 'io.arrow-kt:arrow-core:0.6.1'
     compile 'io.arrow-kt:arrow-typeclasses:0.6.1'
@@ -33,9 +21,9 @@ dependencies {
     compile 'io.arrow-kt:arrow-effects:0.6.1'
 }
 
-compileKotlin {
+kotlin.experimental.coroutines 'enable'
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile) {
     kotlinOptions.jvmTarget = "1.8"
 }
-compileTestKotlin {
-    kotlinOptions.jvmTarget = "1.8"
-}
+
