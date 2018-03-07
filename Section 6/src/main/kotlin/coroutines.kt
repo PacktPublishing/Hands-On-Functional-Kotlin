@@ -14,7 +14,6 @@ suspend fun <T : Any> IO<T>.await(): Either<Throwable, T> =
 fun main(args: Array<String>) {
     runBlocking {
         IO { "Hello Coroutine" }
-                // Run asynchronously
                 .await()
                 // Wait for result on Coroutine dispatcher
                 .fold(
@@ -25,7 +24,6 @@ fun main(args: Array<String>) {
 
     launch(UI) {
         IO { "Hello Coroutine" }
-                // Run asynchronously
                 .await()
                 // Wait for result on Coroutine dispatcher
                 .fold(
