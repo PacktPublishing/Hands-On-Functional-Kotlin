@@ -30,9 +30,3 @@ class FunctionalKotlinSample : Application() {
         }
     }
 }
-
-fun reduce(state: RootState, a: Action): RootState =
-        when (a) {
-            Refresh -> refresh(state)
-            Clear -> clear(state)
-        }
