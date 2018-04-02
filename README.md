@@ -9,10 +9,12 @@ This course demonstrates Kotlin language features and use-cases as well as popul
 <H2>What You Will Learn</H2>
 <DIV class=book-info-will-learn-text>
 <UL>
-<LI>Build and deploy natural-sounding chatbots 
-<LI>Design and build sound interaction models for your chatbots 
-<LI>Deploy web apps to Heroku 
-<LI>Develop third-party apps for Slack and other messaging platforms </LI></UL></DIV>
+<LI>Learn the Kotlin Functional Programming paradigm 
+<LI>Use basic functions to build your own programs 
+<LI>Implement basic functional algorithms and functional lists
+<LI>Explore recursive functions, pattern matching, and immutable data structures
+<LI>Learn higher-order lambda expressions and generics
+<LI>Learn various Arrow Library components </LI></UL></DIV>
 
 ## Instructions and Navigation
 ### Assumed Knowledge
