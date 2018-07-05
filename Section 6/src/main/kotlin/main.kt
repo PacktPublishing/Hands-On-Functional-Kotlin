@@ -1,9 +1,5 @@
-import arrow.core.Either
 import arrow.effects.IO
-import arrow.syntax.either.left
-import arrow.syntax.either.right
 import arrow.syntax.function.curried
-import javafx.application.Application
 import javafx.collections.FXCollections
 import javafx.collections.ObservableList
 import javafx.geometry.Insets
@@ -13,114 +9,14 @@ import javafx.scene.control.ListView
 import javafx.scene.layout.HBox
 import javafx.scene.layout.VBox
 import javafx.scene.text.Text
+import javafx.scene.transform.Transform
 import javafx.stage.Stage
-import kotlinx.coroutines.experimental.Job
-import kotlinx.coroutines.experimental.delay
-import kotlinx.coroutines.experimental.launch as coroutinesLaunch
+import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.launch
+import kotlinx.coroutines.experimental.withContext
 import java.io.IOException
 import java.util.Random
-import kotlin.coroutines.experimental.suspendCoroutine
 import kotlinx.coroutines.experimental.javafx.JavaFx as UI
-
-class FunctionalKotlinSample : Application() {
-
-    lateinit var binder: Binder<RootState>
-
-    override fun start(primaryStage: Stage) {
-        val dataSource = DataSourceImpl()
-        val state = RootState()
-        val dispatcher = ActionHandlerImpl(dataSource, { binder }, state)
-        val rootView = RootView(primaryStage)
-        binder = BinderImpl(rootView, dispatcher)
-        dispatcher.dispatchAction(Refresh)
-    }
-
-    companion object {
-        // Entry point
-        @JvmStatic fun main(args: Array<String>) {
-            // Launch example App
-            launch(FunctionalKotlinSample::class.java)
-        }
-    }
-}
-
-class DataSourceImpl : DataSource {
-    override suspend fun downloadNames(): IO<List<String>> {
-        delay(2000)
-        return IO {
-            if (Random().nextInt() % 2 == 0) throw IOException()
-            listOf("Adam", "Alex", "Alfred", "Albert",
-                    "Brenda", "Connie", "Derek", "Donny",
-                    "Lynne", "Myrtle", "Rose", "Rudolph",
-                    "Tony", "Trudy", "Williams", "Zach"
-            ).shuffled()
-        }
-    }
-}
-
-//Side effects container
-class ActionHandlerImpl(
-        val dataSource: DataSource,
-        binderProducer: () -> Binder<RootState>,
-        var state: RootState
-) : ActionHandler<Job> {
-
-    val binder by lazy(binderProducer)
-
-    override fun dispatchAction(a: Action): Job = coroutinesLaunch(UI) {
-        state = reduce(
-                a,
-                { refresh(state, binder, dataSource) },
-                { clear(state, binder) }
-        )
-    }
-
-}
-
-inline fun reduce(a: Action, refresh: () -> RootState, clear: () -> RootState): RootState =
-        when (a) {
-            Refresh -> refresh()
-            Clear -> clear()
-        }
-
-val errorHandler = { state: RootState, binder: Binder<RootState>, _: Throwable ->
-    updateState(state, Unit, binder) {
-        copy(showLoading = false, showError = true)
-    }
-}.curried()
-
-val refreshHandler = { state: RootState, binder: Binder<RootState>, names: List<String> ->
-    updateState(state, names, binder) {
-        copy(names = it, showLoading = false, showError = false)
-    }
-}.curried()
-
-private suspend fun clear(state: RootState, binder: Binder<RootState>) =
-        updateState(state, emptyList<String>(), binder) { copy(names = it) }
-
-private suspend fun refresh(state: RootState, binder: Binder<RootState>, dataSource: DataSource): RootState {
-    updateState(state, Unit, binder) { copy(showLoading = true, showError = false) }
-    return dataSource.downloadNames().await().fold(
-            errorHandler(state)(binder),
-            refreshHandler(state)(binder)
-    )
-}
-
-inline fun <T : Any> updateState(
-        state: RootState,
-        arg: T,
-        binder: Binder<RootState>,
-        f: RootState.(T) -> RootState
-): RootState = f(state, arg).let(binder::bind)
-
-suspend fun <T : Any> IO<T>.await(): Either<Throwable, T> = suspendCoroutine { cont ->
-    unsafeRunAsync {
-        it.fold(
-                { cont.resume(it.left()) },
-                { cont.resume(it.right()) }
-        )
-    }
-}
 
 class RootView(val primaryStage: Stage) {
 
@@ -133,11 +29,10 @@ class RootView(val primaryStage: Stage) {
     val list = ListView<String>()
 
     init {
-
         list.setPrefSize(width, height)
-
         val root = VBox()
-
+        root.transforms.add(Transform.scale(2.0, 2.0))
+        VBox.setMargin(root, Insets(240.0))
         val buttons = HBox()
         buttons.children.add(refresh)
         buttons.children.add(clear)
@@ -152,12 +47,28 @@ class RootView(val primaryStage: Stage) {
     }
 }
 
+//Immutable app state
+data class RootState(
+        val title: String = "Hands On Functional Kotlin",
+        val refreshText: String = "Refresh",
+        val clearText: String = "Clear",
+        val loadingText: String = "Loading...",
+        val errorText: String = "Error refreshing, try again",
+        val showLoading: Boolean = true,
+        val showError: Boolean = false,
+        val names: List<String> = emptyList()
+) : State
+
 //Side effects container
-class BinderImpl(private val view: RootView, val actionHandler: ActionHandler<Job>) : Binder<RootState> {
+class BinderImpl(
+        private val view: RootView,
+        private val callback: (Action) -> Unit
+) : Binder<RootState> {
 
     val data: ObservableList<String> = FXCollections.observableArrayList()
 
     override fun bind(state: RootState): RootState = state.apply {
+        // Not optimised
         data.apply {
             clear()
             addAll(names)
@@ -171,8 +82,83 @@ class BinderImpl(private val view: RootView, val actionHandler: ActionHandler<Jo
             error.text = errorText
             loading.isVisible = showLoading
             error.isVisible = showError
-            refresh.setOnMouseClicked { actionHandler.dispatchAction(Refresh) }
-            clear.setOnMouseClicked { actionHandler.dispatchAction(Clear) }
+            refresh.setOnMouseClicked { callback(Refresh) }
+            clear.setOnMouseClicked { callback(Clear) }
         }
     }
 }
+// Reducer
+fun reduce(state: RootState, a: Action): RootState =
+        when (a) {
+            Refresh -> refresh(state)
+            Clear -> clear(state)
+        }
+
+class StoreImpl : Store<RootState> {
+    override var state: RootState = RootState()
+    var observers: Set<(RootState) -> Unit> = emptySet()
+
+    override fun push(state: RootState) {
+        this.state = state
+        observers.forEach { it(state) }
+    }
+
+    override fun observe(callback: (RootState) -> Unit) {
+        observers += callback
+    }
+
+}
+
+class DataSourceImpl : DataSource {
+    override fun downloadNames(): IO<List<String>> = IO {
+        Thread.sleep(2000)
+        if (Random().nextInt() % 2 == 0) throw IOException()
+        listOf("Adam", "Alex", "Alfred", "Albert",
+                "Brenda", "Connie", "Derek", "Donny",
+                "Lynne", "Myrtle", "Rose", "Rudolph",
+                "Tony", "Trudy", "Williams", "Zach"
+        ).shuffled()
+    }
+}
+
+class MiddleWareImpl(
+        val dataSource: () -> IO<List<String>>,
+        val callback: (RootState) -> Unit
+) : MiddleWare<RootState> {
+    override fun handleAction(state: RootState, action: Action) {
+        if (action == Refresh) {
+            launch(UI) {
+                val result = withContext(CommonPool) { dataSource().await() }
+                result.fold(errorHandler(state), refreshHandler(state))
+                        .let(callback)
+            }
+        }
+        // Ignore all other actions
+    }
+}
+
+inline fun <T : Any> updateState(
+        state: RootState,
+        arg: T,
+        f: RootState.(T) -> RootState
+): RootState = f(state, arg)
+
+// Reducer
+fun clear(state: RootState) =
+        updateState(state, emptyList<String>()) { copy(names = it) }
+
+fun refresh(state: RootState): RootState =
+        updateState(state, Unit) { copy(showLoading = true, showError = false) }
+
+// Middleware
+val errorHandler = { state: RootState, _: Throwable ->
+    updateState(state, Unit) {
+        copy(showLoading = false, showError = true)
+    }
+}.curried()
+
+val refreshHandler = { state: RootState, names: List<String> ->
+    updateState(state, names) {
+        copy(names = it, showLoading = false, showError = false)
+    }
+}.curried()
